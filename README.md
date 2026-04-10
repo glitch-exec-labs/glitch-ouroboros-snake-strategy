@@ -107,6 +107,7 @@ glitch-ouroboros-snake-strategy/
 - [Architecture](./docs/architecture.md)
 - [Operating Model](./docs/operating-model.md)
 - [Platforms](./docs/platforms.md)
+- [Social Preview Brief](./docs/social-preview.md)
 - [MT5 Track](./mt5/README.md)
 - [cTrader Track](./ctrader/README.md)
 
