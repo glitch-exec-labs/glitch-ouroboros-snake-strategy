@@ -5,12 +5,25 @@
 Glitch's flagship multi-bot ensemble, combining Oracle coordination with the six-snake execution stack.
 
 ![Product](https://img.shields.io/badge/product-Flagship%20Ensemble-0f766e?style=for-the-badge)
+![Family](https://img.shields.io/badge/family-glitch%20trading-111827?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-MT5%20today%20%7C%20cTrader%20next-111827?style=for-the-badge)
-![Architecture](https://img.shields.io/badge/architecture-Oracle%20%2B%20Six%20Snakes-1d4ed8?style=for-the-badge)
+![Scope](https://img.shields.io/badge/scope-oracle%20%7C%20ensemble%20%7C%20risk-1d4ed8?style=for-the-badge)
 
 [Glitch Trading Core](https://github.com/glitch-executor/glitch-trading-core) · [Indian King Cobra](https://github.com/glitch-executor/glitch-indian-king-cobra) · [Terciopelo](https://github.com/glitch-executor/glitch-terciopelo)
 
 </div>
+
+> Ouroboros Snake Strategy is the flagship coordinated Glitch ensemble: six specialized execution bots, one Oracle layer, and a portfolio-aware risk model designed to keep the stack coherent.
+
+## Glitch Trading Family
+
+```mermaid
+flowchart LR
+    A[Glitch Trading Core] --> B[Ouroboros Snake Strategy]
+    A --> C[Indian King Cobra]
+    A --> D[Terciopelo]
+    B --> E[Flagship Multi-Bot Ensemble]
+```
 
 ## Repo Role
 
@@ -36,7 +49,7 @@ It sits alongside:
 
 ## Why It Exists
 
-Ouroboros is the public-facing strategy identity for the main Glitch ensemble.
+Ouroboros is the public-facing flagship identity for the main Glitch ensemble.
 
 The goal is to keep:
 
