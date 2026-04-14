@@ -9,7 +9,7 @@ Glitch's flagship multi-bot ensemble, combining Oracle coordination with the six
 ![Platform](https://img.shields.io/badge/platform-MT5%20today%20%7C%20cTrader%20next-111827?style=for-the-badge)
 ![Scope](https://img.shields.io/badge/scope-oracle%20%7C%20ensemble%20%7C%20risk-1d4ed8?style=for-the-badge)
 
-[Glitch Trading Core](https://github.com/glitch-executor/glitch-trading-core) · [Indian King Cobra](https://github.com/glitch-executor/glitch-indian-king-cobra) · [Terciopelo](https://github.com/glitch-executor/glitch-terciopelo)
+[Glitch Trading Core](https://github.com/glitch-exec-labs/glitch-trading-core) · [Indian King Cobra](https://github.com/glitch-exec-labs/glitch-indian-king-cobra) · [Terciopelo](https://github.com/glitch-exec-labs/glitch-terciopelo)
 
 </div>
 
@@ -43,9 +43,9 @@ It combines:
 
 It sits alongside:
 
-- [Glitch Trading Core](https://github.com/glitch-executor/glitch-trading-core) as the umbrella architecture repo
-- [Indian King Cobra](https://github.com/glitch-executor/glitch-indian-king-cobra) as the standalone unified momentum scalper
-- [Terciopelo](https://github.com/glitch-executor/glitch-terciopelo) as the standalone equities relative-value strategy
+- [Glitch Trading Core](https://github.com/glitch-exec-labs/glitch-trading-core) as the umbrella architecture repo
+- [Indian King Cobra](https://github.com/glitch-exec-labs/glitch-indian-king-cobra) as the standalone unified momentum scalper
+- [Terciopelo](https://github.com/glitch-exec-labs/glitch-terciopelo) as the standalone equities relative-value strategy
 
 ## Why It Exists
 
