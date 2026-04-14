@@ -13,15 +13,14 @@ no Docker touches, no DB writes, `live=False` hardcoded.
 
 ## Why this exists
 
-The existing `ml_data/` folder in the ml-data repo is polluted with
-development-phase data — 712,967 signals with zero executed trades,
-plus ~230 closed trades aggregating to −$28K P&L across prop/demo experiments.
-Rather than build customer-facing products on that data, we start over with
-a single clean source of truth.
+The previous `ml_data/` folder in the companion ml-data repo accumulated
+development-phase noise — many signals with no executed trades, and a
+separate set of closed trades from prop/demo experiments. Rather than train
+on mixed data, we start over with a single clean source of truth.
 
-After ~30 days of continuous operation, we'll have statistically meaningful,
-git-versioned performance data that answers the only question that matters:
-**does the edge actually exist on a clean account?**
+After a sustained run of continuous operation on clean demo accounts, we'll
+have statistically meaningful, git-versioned performance data that answers
+the only question that matters: **does the edge actually exist?**
 
 ---
 
@@ -43,12 +42,14 @@ All CSV writes are crash-safe: `fsync` on append, `tempfile + os.replace` on upd
 
 ## Safety rails (why this cannot touch production)
 
-1. Dedicated Linux user `glitchml` — cannot read `/opt/glitchexecutor/.env`
+1. Dedicated Linux user — cannot read the production platform's `.env`
 2. Separate venv at `ml_collector/venv/` — cannot accidentally use production site-packages
 3. Separate `.env` at `ml_collector/.env` — `config.py` **only** loads this file
 4. `ML_CTRADER_*` env vars → proxied to `CTRADER_*` with `CTRADER_LIVE=false` forced
 5. `CTraderClient(..., live=False)` hardcoded in `collector.py`
-6. Runtime assertion: `account_id != 46868136` — collector refuses to start if it matches the production live account
+6. Runtime assertion: account ID must not match the production live account
+   (configured via `_FORBIDDEN_LIVE_ACCOUNT_ID` in `config.py`); collector
+   refuses to start otherwise
 7. `systemd` `ReadWritePaths=` limits filesystem writes to two paths only
 8. `git add ml_data_clean` — explicit path, **never** `git add -A`
 
@@ -56,66 +57,25 @@ All CSV writes are crash-safe: `fsync` on append, `tempfile + os.replace` on upd
 
 ## Bootstrap (first-time install)
 
-```bash
-# 1. Create dedicated user
-sudo useradd -r -m -d /home/glitchml -s /bin/bash glitchml
+Server-side paths, user names, and companion-repo names are environment-specific
+and documented in private ops runbooks — not here. The outline of the
+bootstrap is:
 
-# 2. Generate SSH deploy key for the ml-data repo
-sudo -u glitchml ssh-keygen -t ed25519 -f /home/glitchml/.ssh/id_ed25519 -N ""
-sudo cat /home/glitchml/.ssh/id_ed25519.pub
-# Add the above as a WRITE deploy key on github.com/glitch-executor/glitch-executor-ml-data
-
-# 3. Clone the data repo (use ssh, not https)
-sudo mkdir -p /opt/glitch-ml-data
-sudo chown glitchml:glitchml /opt/glitch-ml-data
-sudo -u glitchml git clone git@github.com:glitch-executor/glitch-executor-ml-data.git /opt/glitch-ml-data
-
-# 4. Give glitchml write access to the collector dir + state dir
-sudo chown -R glitchml:glitchml /opt/glitchexecutor/ml_collector
-
-# 5. Create venv + install deps
-sudo -u glitchml python3 -m venv /opt/glitchexecutor/ml_collector/venv
-sudo -u glitchml /opt/glitchexecutor/ml_collector/venv/bin/pip install \
-  -r /opt/glitchexecutor/ml_collector/requirements.txt
-
-# 6. Create a FRESH Spotware demo account + cTrader API app, get credentials
-#    https://ct.spotware.com — new demo account
-#    https://openapi.ctrader.com — create app, generate OAuth token for the demo
-#    CRITICAL: must not be account 46868136
-
-# 7. Fill in .env
-sudo -u glitchml cp /opt/glitchexecutor/ml_collector/.env.example \
-                    /opt/glitchexecutor/ml_collector/.env
-sudo -u glitchml nano /opt/glitchexecutor/ml_collector/.env
-sudo chmod 600 /opt/glitchexecutor/ml_collector/.env
-
-# 8. Smoke test — prints signals for both strategies, no trade, no CSV
-sudo -u glitchml /opt/glitchexecutor/ml_collector/venv/bin/python \
-  -m ml_collector.tests.test_smoke
-
-# 9. Dry-run CSV write (writes to /tmp/ml_smoke)
-sudo -u glitchml /opt/glitchexecutor/ml_collector/venv/bin/python \
-  -m ml_collector.tests.test_smoke --write --dir /tmp/ml_smoke
-
-# 10. Install systemd units
-sudo cp /opt/glitchexecutor/ml_collector/systemd/glitch-ml-collector.service /etc/systemd/system/
-sudo cp /opt/glitchexecutor/ml_collector/systemd/glitch-ml-gitsync.service /etc/systemd/system/
-sudo cp /opt/glitchexecutor/ml_collector/systemd/glitch-ml-gitsync.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-
-# 11. Start the collector
-sudo systemctl enable --now glitch-ml-collector.service
-sudo systemctl status glitch-ml-collector
-journalctl -u glitch-ml-collector -f
-
-# 12. Enable the git-sync timer
-sudo systemctl enable --now glitch-ml-gitsync.timer
-sudo systemctl list-timers | grep glitch-ml
-
-# 13. Manual first git sync — verify a commit lands on GitHub before going to sleep
-sudo systemctl start glitch-ml-gitsync.service
-sudo journalctl -u glitch-ml-gitsync -n 50
-```
+1. Create a dedicated Linux user for the collector.
+2. Generate an SSH deploy key for the ml-data companion repo; register it as a
+   write key on the companion repo.
+3. Clone the ml-data companion repo as the dedicated user.
+4. Create a venv inside this `ml_collector/` directory and
+   `pip install -r ../requirements.txt`.
+5. Create a fresh Spotware demo account and register an app at
+   <https://openapi.ctrader.com> to obtain OAuth credentials.
+6. Copy `.env.example` to `.env` and fill in the credentials. Set
+   `ML_FORBIDDEN_ACCOUNT_ID` to your production live account ID as a
+   safety net.
+7. Run the smoke tests (`python -m ml_collector.tests.test_smoke`).
+8. Install the systemd unit from `ctrader/systemd/` and enable it.
+9. Enable the git-sync timer.
+10. Manually trigger a first git sync and verify a commit lands on GitHub.
 
 ---
 
@@ -144,12 +104,12 @@ positions close.
 
 ---
 
-## File layout in the ml-data repo
+## File layout in the companion ml-data repo
 
 ```
-/opt/glitch-ml-data/
-├── ml_data/                        # existing polluted data, untouched
-└── ml_data_clean/                  # NEW — this collector writes here
+<ml-data repo>/
+├── ml_data/                        # legacy data, untouched
+└── ml_data_clean/                  # this collector writes here
     ├── king_cobra/
     │   └── king_cobra_signals_YYYY-MM-DD.csv
     └── mamba/
@@ -184,19 +144,14 @@ positions close.
 - **Logs:** `journalctl -u glitch-ml-collector -f`
 - **Next git sync:** `systemctl list-timers glitch-ml-gitsync.timer`
 - **Last git sync:** `journalctl -u glitch-ml-gitsync -n 200`
-- **Tracked open positions:** `cat /opt/glitchexecutor/ml_collector/state/open_trades.json`
-- **PID lock file:** `cat /opt/glitchexecutor/ml_collector/state/collector.pid`
+- **Tracked open positions:** `cat <collector_dir>/state/open_trades.json`
+- **PID lock file:** `cat <collector_dir>/state/collector.pid`
 - **Force a git sync now:** `sudo systemctl start glitch-ml-gitsync.service`
-- **Manual rebuild from scratch:** `sudo systemctl stop glitch-ml-collector && rm -f state/open_trades.json && sudo systemctl start glitch-ml-collector`
+- **Manual rebuild from scratch:** stop the service, remove
+  `state/open_trades.json`, restart.
 
 ## Revoking access
 
-To completely disable and clean up:
-
-```bash
-sudo systemctl disable --now glitch-ml-collector.service glitch-ml-gitsync.timer
-sudo rm /etc/systemd/system/glitch-ml-{collector,gitsync}.{service,timer}
-sudo systemctl daemon-reload
-sudo userdel -r glitchml
-# Revoke the deploy key on github.com/glitch-executor/glitch-executor-ml-data/settings/keys
-```
+1. Disable and remove the two systemd units, then `daemon-reload`.
+2. Remove the dedicated Linux user.
+3. Revoke the deploy key on the companion ml-data repo's settings page.

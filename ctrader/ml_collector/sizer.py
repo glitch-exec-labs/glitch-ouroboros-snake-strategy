@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import struct
 import time
 import uuid
@@ -64,8 +65,9 @@ class BalanceCache:
             if entry:
                 logger.warning("balance fetch failed for %d, reusing stale %.2f", account_id, entry[0])
                 return entry[0]
-            logger.warning("balance fetch failed for %d, no cached value; using 50000", account_id)
-            return 50000.0  # fall back to nominal $50K
+            fallback = float(os.environ.get("ML_FALLBACK_BALANCE", "10000") or "10000")
+            logger.warning("balance fetch failed for %d, no cached value; using fallback %.0f", account_id, fallback)
+            return fallback
 
 
 async def _fetch_balance(client, account_id: int) -> Optional[float]:

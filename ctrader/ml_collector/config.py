@@ -21,7 +21,12 @@ from dotenv import load_dotenv
 
 _COLLECTOR_DIR = Path(__file__).resolve().parent
 _ENV_PATH = _COLLECTOR_DIR / ".env"
-_FORBIDDEN_LIVE_ACCOUNT_ID = 46868136
+
+
+def _forbidden_live_account_id() -> int:
+    """Resolved at runtime (after .env is loaded) so the real value stays
+    out of the repo. Set ML_FORBIDDEN_ACCOUNT_ID in the runtime .env."""
+    return int(os.environ.get("ML_FORBIDDEN_ACCOUNT_ID", "0") or "0")
 
 logger = logging.getLogger("ml_collector.config")
 
@@ -94,10 +99,10 @@ def _parse_bots(raw: str) -> List[BotConfig]:
                 max_concurrent=int(it.get("max_concurrent", 1)),
                 bar_count=int(it.get("bar_count", 200)),
             )
-            if bot.account_id == _FORBIDDEN_LIVE_ACCOUNT_ID:
+            forbidden = _forbidden_live_account_id()
+            if forbidden and bot.account_id == forbidden:
                 raise RuntimeError(
-                    f"Bot {bot.name!r} uses account_id {bot.account_id}, "
-                    f"which is the production live account. Refusing to start."
+                    f"Bot {bot.name!r} uses a forbidden account_id. Refusing to start."
                 )
             out.append(bot)
         except (KeyError, ValueError, TypeError) as e:
@@ -139,7 +144,8 @@ def get_config() -> Config:
     price_feed_account = int(
         os.environ.get("ML_PRICE_FEED_ACCOUNT_ID") or bots[0].account_id
     )
-    if price_feed_account == _FORBIDDEN_LIVE_ACCOUNT_ID:
+    forbidden = _forbidden_live_account_id()
+    if forbidden and price_feed_account == forbidden:
         raise RuntimeError("price_feed_account_id must not be the production live account")
 
     cfg = Config(

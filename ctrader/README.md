@@ -15,16 +15,19 @@ ctrader/
 └── README.md
 ```
 
-## Bot-to-account mapping (Pepperstone demo, $50K each)
+## Bot-to-model mapping
 
-| Bot | Model | TF | Account |
-|-----|-------|-----|---------|
-| hydra | mamba_reversion | m1 | 5267354 |
-| viper | momentum_hunter | m5 | 5267327 |
-| mamba | mamba_reversion | m15 | 5267330 |
-| taipan | session_analyst | m30 | 5267355 |
-| cobra | trend_follower | h1 | 5267329 |
-| anaconda | volume_profiler | h4 | 5267391 |
+Each bot is bound to its own cTrader Open API account (account IDs are
+configured in `.env` as `ML_BOTS` JSON and are never committed).
+
+| Bot | Model | Timeframe |
+|-----|-------|-----------|
+| hydra | mamba_reversion | m1 |
+| viper | momentum_hunter | m5 |
+| mamba | mamba_reversion | m15 |
+| taipan | session_analyst | m30 |
+| cobra | trend_follower | h1 |
+| anaconda | volume_profiler | h4 |
 
 ## Adaptive position sizing
 

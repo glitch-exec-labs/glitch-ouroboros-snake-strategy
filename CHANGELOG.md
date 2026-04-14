@@ -7,10 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added — 2026-04-14 · ctrader/ track goes live
 
-- **ctrader/ subtree** now holds the live six-snake execution stack previously at
-  `/opt/glitchexecutor/ml_collector/` on the server.
+- **ctrader/ subtree** now holds the live six-snake execution stack previously
+  managed outside this repo.
   - `ctrader/ml_collector/` — 6 bots (hydra m1, viper m5, mamba m15, taipan m30,
-    cobra h1, anaconda h4) each bound to its own Pepperstone $50K demo account.
+    cobra h1, anaconda h4) each bound to its own cTrader Open API demo account.
   - `ctrader/executor/` — vendored cTrader Open API client.
   - `ctrader/ensemble/` — vendored price feed + 7 strategy models.
   - `ctrader/systemd/glitch-ml-collector.service` — deploy unit.
@@ -47,15 +47,15 @@ All three fixed in `ctrader/ml_collector/order_placer.py`:
 
 ### Migration path (server, one-time)
 
-- Cloned repo to `/opt/glitch-ouroboros` as the `glitchml` user.
-- Seeded `.env` + `state/` from `/opt/glitchexecutor/ml_collector/` (excluded
-  from git via `.gitignore`).
+- Cloned repo to a new deploy location under a dedicated service user.
+- Seeded `.env` + `state/` from the previous location (excluded from git
+  via `.gitignore`).
 - Built fresh venv, installed pinned `requirements.txt`.
-- Replaced `/etc/systemd/system/glitch-ml-collector.service` with the unit
-  from `ctrader/systemd/`, `daemon-reload`, `restart`.
-- Added passwordless sudo rules for the deploy user (`sudo -u glitchml git
-  pull` + `sudo systemctl restart glitch-ml-collector.service`).
-- Archived old location at `/opt/glitchexecutor/ml_collector.OLD-20260414`.
+- Replaced the systemd unit with the one from `ctrader/systemd/`,
+  `daemon-reload`, `restart`.
+- Added passwordless sudo rules for the deploy user (narrow scope: one git
+  pull command + one systemctl restart command).
+- Archived old location as a dated backup.
 
 ### Known issues (follow-up work)
 
