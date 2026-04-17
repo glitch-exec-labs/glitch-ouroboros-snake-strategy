@@ -6,11 +6,16 @@ Two-layer news filter:
   2. Brave Search live news check — symbol-specific queries, cached 5 min,
      fail-open (returns False on any API error so trading is never stuck).
 """
+import os
 import time
 import requests
 from datetime import datetime, timezone, timedelta
 
-BRAVE_API_KEY = "BSA6fJYRU5hT2r55TvOgAxmvMfmcbbP"
+# NOTE (2026-04-17): a Brave Search API key was previously hardcoded here and
+# leaked publicly. It has been removed. When reactivating this bot, create a
+# fresh key at https://api.search.brave.com/app/keys and export BRAVE_API_KEY.
+# The old hardcoded key must be considered compromised — do NOT reuse it.
+BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
 BRAVE_URL = "https://api.search.brave.com/res/v1/news/search"
 
 # Cache: {symbol: (unix_ts_fetched, result_bool)}
