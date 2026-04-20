@@ -340,12 +340,99 @@ async def run(cfg: Config) -> None:
     # ── Monitor loop (position closure detection) ──────────────────────
 
     async def monitor_loop() -> None:
+        # account_id -> bot metadata for orphan backfill
+        bot_by_account = {b.account_id: b for b in cfg.bots}
+        # account_id -> (symbolId -> name) cache, refreshed on cache miss
+        symname_cache: Dict[int, Dict[int, str]] = {}
+
+        async def _resolve_symname(account_id: int, symbol_id) -> str:
+            try:
+                sid = int(symbol_id)
+            except (TypeError, ValueError):
+                return str(symbol_id)
+            if account_id not in symname_cache:
+                symname_cache[account_id] = {}
+            if sid in symname_cache[account_id]:
+                return symname_cache[account_id][sid]
+            client_ = clients.get(account_id)
+            if not client_:
+                return f"SYMID:{sid}"
+            # One-shot SymbolsListReq via the client's session helper
+            try:
+                import uuid as _uuid
+                from .oracle import CORRELATION_BUCKETS  # noqa
+                async def _fetch_all(reader, writer):
+                    from .order_placer import PT_SYMBOL_BY_ID_REQ  # unused, just proves import path
+                    from executor.protobuf import Protobuf as _Pb
+                    req = _Pb.get("SymbolsListReq",
+                                  ctidTraderAccountId=account_id,
+                                  includeArchivedSymbols=False)
+                    mid = str(_uuid.uuid4())[:8]
+                    writer.write(client_._build_frame(req, mid))
+                    await writer.drain()
+                    res_msg = await client_._recv_until(
+                        reader, [_Pb.get_type("SymbolsListRes")], mid
+                    )
+                    res = _Pb.extract(res_msg)
+                    return {s.symbolId: s.symbolName for s in res.symbol}
+                name_map = await client_._session(_fetch_all)
+                symname_cache[account_id] = name_map
+                return name_map.get(sid, f"SYMID:{sid}")
+            except Exception:
+                logger.exception("symbol name resolve failed for acct %d sid %s",
+                                 account_id, symbol_id)
+                return f"SYMID:{sid}"
+
+        async def _backfill_orphan(account_id: int, pos: dict) -> None:
+            bot = bot_by_account.get(account_id)
+            if bot is None:
+                logger.warning("orphan on unknown account %d tkt=%s — cannot backfill",
+                               account_id, pos.get("ticket"))
+                return
+            tkt = str(pos["ticket"])
+            symbol = await _resolve_symname(account_id, pos.get("symbol"))
+            side = pos.get("side", "BUY").upper()
+            lots = float(pos.get("amount", 0) or 0)
+            entry_price = float(pos.get("entry_price", 0) or 0)
+
+            # Synthetic signal so insert_trade.signal_id FK is satisfied.
+            sig_id = await db.insert_signal(
+                bot_name=bot.name, model_name=bot.model, symbol=symbol,
+                timeframe=bot.timeframe, account_id=account_id,
+                vote=side, confidence=0.0,
+                reasoning="broker_orphan_backfill",
+                bar_time=None,
+                bar_open=entry_price, bar_high=entry_price,
+                bar_low=entry_price,  bar_close=entry_price,
+                indicators={"orphan": True, "ticket": tkt},
+                executed=True,
+            )
+            if sig_id is None:
+                logger.warning("orphan synthetic signal insert failed for %s tkt=%s",
+                               symbol, tkt)
+                return
+            db_id = await db.insert_trade(
+                signal_id=sig_id, bot_name=bot.name, model_name=bot.model,
+                symbol=symbol, timeframe=bot.timeframe, account_id=account_id,
+                side=side, entry_price=entry_price,
+                sl_price=0.0, tp_price=0.0,
+                volume_lots=lots, wire_volume=int(round(lots * 100)),
+                ticket=tkt, signal_confidence=0.0,
+                signal_indicators={"orphan": True, "backfilled_at": datetime.now(timezone.utc).isoformat()},
+            )
+            logger.warning(
+                "ORPHAN BACKFILLED %s %s %s lots=%.2f tkt=%s -> db_id=%s",
+                bot.name, symbol, side, lots, tkt, db_id,
+            )
+
         while not stop.is_set():
             try:
                 open_trades = await db.get_open_trades()
-                if open_trades:
-                    # Group trades by account for efficient polling
-                    by_account: Dict[int, List[dict]] = {}
+                if True:  # keep existing indentation
+                    # Group trades by account for efficient polling;
+                    # ensure every bot account is represented so orphan
+                    # detection runs even when DB-open count is zero.
+                    by_account: Dict[int, List[dict]] = {aid: [] for aid in bot_by_account}
                     for t in open_trades:
                         by_account.setdefault(t["account_id"], []).append(t)
 
@@ -416,6 +503,16 @@ async def run(cfg: Config) -> None:
                                         "CLOSURE %s %s %s outcome=%s pnl=%.2f",
                                         t["bot_name"], t["symbol"], exit_reason, outcome, pnl,
                                     )
+
+                            # Orphan detection — any broker-open ticket NOT in ml_trades
+                            db_tickets = {str(t["ticket"]) for t in trades if t["ticket"]}
+                            for pos in positions:
+                                tkt = str(pos.get("ticket"))
+                                if tkt and tkt not in db_tickets:
+                                    try:
+                                        await _backfill_orphan(account_id, pos)
+                                    except Exception:
+                                        logger.exception("orphan backfill failed tkt=%s", tkt)
                         except Exception:
                             logger.exception("monitor_loop failed for account %s", account_id)
             except Exception:
