@@ -4,12 +4,16 @@ GlitchExecutor - cTrader Open API Client
 Async TCP client for the cTrader Open API (live + demo accounts).
 Uses asyncio streams directly — no Twisted dependency.
 Matches the same interface as MT5Client and ExchangeClient.
+
+Proto messages are built and parsed via the vendored Protobuf helper
+(executor/protobuf.py, sourced from spotware/OpenApiPy). No manual
+payload-type constants needed — any new cTrader message type works
+automatically after a `pip install -U ctrader-open-api`.
 """
 import asyncio
 import ssl
 import struct
 import uuid
-import json
 import logging
 from typing import Dict, List, Optional
 
@@ -19,41 +23,9 @@ LIVE_HOST = "live.ctraderapi.com"
 DEMO_HOST = "demo.ctraderapi.com"
 PORT = 5035  # SSL
 
-# Payload type constants (cTrader OpenApiMessages.proto)
-PT_APP_AUTH_REQ       = 2100
-PT_APP_AUTH_RES       = 2101
-PT_ACCOUNT_AUTH_REQ   = 2102
-PT_ACCOUNT_AUTH_RES   = 2103
-PT_TRADER_REQ         = 2121  # PROTO_OA_TRADER_REQ
-PT_TRADER_RES         = 2122  # PROTO_OA_TRADER_RES (2104/2105 are a different message and return empty)
-PT_NEW_ORDER_REQ      = 2106
-PT_SYMBOLS_LIST_REQ   = 2114
-PT_SYMBOLS_LIST_RES   = 2115
-PT_RECONCILE_REQ      = 2124
-PT_RECONCILE_RES      = 2125
-PT_EXECUTION_EVENT    = 2126
-PT_CLOSE_POSITION_REQ = 2140
-PT_AMEND_SLTP_REQ     = 2141
-PT_ERROR_RES          = 2142
-PT_HEARTBEAT          = 51
-
 try:
     from ctrader_open_api.messages.OpenApiCommonMessages_pb2 import ProtoMessage
-    from ctrader_open_api.messages.OpenApiMessages_pb2 import (
-        ProtoOAApplicationAuthReq,
-        ProtoOAAccountAuthReq,
-        ProtoOATraderReq, ProtoOATraderRes,
-        ProtoOANewOrderReq, ProtoOAExecutionEvent,
-        ProtoOASymbolsListReq, ProtoOASymbolsListRes,
-        ProtoOAReconcileReq, ProtoOAReconcileRes,
-        ProtoOAClosePositionReq,
-        ProtoOAAmendPositionSLTPReq,
-        ProtoOAErrorRes,
-    )
-    from ctrader_open_api.messages.OpenApiModelMessages_pb2 import (
-        ProtoOAOrderType,
-        ProtoOATradeSide,
-    )
+    from .protobuf import Protobuf
     PROTO_AVAILABLE = True
 except ImportError:
     PROTO_AVAILABLE = False
@@ -91,8 +63,8 @@ class CTraderClient:
         self._timeout = 15
 
         logger.info(
-            f"CTraderClient ready — account {account_id} "
-            f"({'LIVE' if live else 'DEMO'}) via {self.host}:{PORT}"
+            "CTraderClient ready — account %s (%s) via %s:%d",
+            account_id, "LIVE" if live else "DEMO", self.host, PORT,
         )
 
     # ── Low-level TCP helpers ─────────────────────────────────────────────────
@@ -101,15 +73,18 @@ class CTraderClient:
         ssl_ctx = ssl.create_default_context()
         return await asyncio.open_connection(self.host, PORT, ssl=ssl_ctx)
 
-    def _build_frame(self, payload_type: int, payload_bytes: bytes,
-                     client_msg_id: str = None) -> bytes:
-        """Wrap payload in ProtoMessage and prefix with 4-byte big-endian length."""
-        msg = ProtoMessage()
-        msg.payloadType = payload_type
-        msg.payload = payload_bytes
+    def _build_frame(self, msg_obj, client_msg_id: str = None) -> bytes:
+        """
+        Wrap a proto message object in a ProtoMessage envelope and prefix
+        with a 4-byte big-endian length.  The payloadType is derived from
+        the message itself — no manual PT_ constants required.
+        """
+        wrapper = ProtoMessage()
+        wrapper.payloadType = msg_obj.payloadType
+        wrapper.payload = msg_obj.SerializeToString()
         if client_msg_id:
-            msg.clientMsgId = client_msg_id
-        encoded = msg.SerializeToString()
+            wrapper.clientMsgId = client_msg_id
+        encoded = wrapper.SerializeToString()
         return struct.pack('>I', len(encoded)) + encoded
 
     async def _recv_frame(self, reader: asyncio.StreamReader) -> ProtoMessage:
@@ -129,23 +104,24 @@ class CTraderClient:
                           expected_types: list,
                           client_msg_id: str = None) -> ProtoMessage:
         """
-        Read messages until one of expected_types arrives.
+        Read frames until one matches expected_types (list of int payloadTypes).
         Silently discards heartbeats. Raises on error responses.
         """
+        _hb  = Protobuf.get_type("HeartbeatEvent")
+        _err = Protobuf.get_type("ErrorRes")
         while True:
             msg = await self._recv_frame(reader)
 
-            if msg.payloadType == PT_HEARTBEAT:
+            if msg.payloadType == _hb:
                 continue
 
-            if msg.payloadType == PT_ERROR_RES:
-                err = ProtoOAErrorRes()
-                err.ParseFromString(msg.payload)
+            if msg.payloadType == _err:
+                err = Protobuf.extract(msg)
                 raise RuntimeError(
                     f"cTrader API error {err.errorCode}: {err.description}"
                 )
 
-            # If we're waiting for a specific msgId, skip unrelated responses
+            # Skip unrelated responses when waiting for a specific msgId
             if (client_msg_id and msg.clientMsgId
                     and msg.clientMsgId != client_msg_id):
                 continue
@@ -161,24 +137,24 @@ class CTraderClient:
         reader, writer = await self._open_connection()
         try:
             # 1. App authentication
-            req = ProtoOAApplicationAuthReq()
-            req.clientId = self.client_id
-            req.clientSecret = self.client_secret
+            req = Protobuf.get("ApplicationAuthReq",
+                               clientId=self.client_id,
+                               clientSecret=self.client_secret)
             mid = str(uuid.uuid4())[:8]
-            writer.write(self._build_frame(PT_APP_AUTH_REQ, req.SerializeToString(), mid))
+            writer.write(self._build_frame(req, mid))
             await writer.drain()
-            await self._recv_until(reader, [PT_APP_AUTH_RES], mid)
+            await self._recv_until(reader, [Protobuf.get_type("ApplicationAuthRes")], mid)
             logger.debug("App auth OK")
 
             # 2. Account authentication
-            req2 = ProtoOAAccountAuthReq()
-            req2.ctidTraderAccountId = self.account_id
-            req2.accessToken = self.access_token
+            req2 = Protobuf.get("AccountAuthReq",
+                                ctidTraderAccountId=self.account_id,
+                                accessToken=self.access_token)
             mid2 = str(uuid.uuid4())[:8]
-            writer.write(self._build_frame(PT_ACCOUNT_AUTH_REQ, req2.SerializeToString(), mid2))
+            writer.write(self._build_frame(req2, mid2))
             await writer.drain()
-            await self._recv_until(reader, [PT_ACCOUNT_AUTH_RES], mid2)
-            logger.debug(f"Account {self.account_id} auth OK")
+            await self._recv_until(reader, [Protobuf.get_type("AccountAuthRes")], mid2)
+            logger.debug("Account %d auth OK", self.account_id)
 
             # 3. Caller's operation
             return await operation(reader, writer)
@@ -202,7 +178,7 @@ class CTraderClient:
             loop.close()
             return result
         except Exception as e:
-            logger.error(f"cTrader health check failed: {e}")
+            logger.error("cTrader health check failed: %s", e)
             return False
 
     async def _health_async(self) -> bool:
@@ -210,38 +186,35 @@ class CTraderClient:
             await self._session(lambda r, w: asyncio.sleep(0))
             return True
         except Exception as e:
-            logger.error(f"cTrader health check error: {e}")
+            logger.error("cTrader health check error: %s", e)
             return False
 
     async def get_balance(self) -> Dict:
         """Get account balance."""
         try:
             async def fetch(reader, writer):
-                req = ProtoOATraderReq()
-                req.ctidTraderAccountId = self.account_id
+                req = Protobuf.get("TraderReq",
+                                   ctidTraderAccountId=self.account_id)
                 mid = str(uuid.uuid4())[:8]
-                writer.write(self._build_frame(PT_TRADER_REQ, req.SerializeToString(), mid))
+                writer.write(self._build_frame(req, mid))
                 await writer.drain()
-                res_msg = await self._recv_until(reader, [PT_TRADER_RES], mid)
-                res = ProtoOATraderRes()
-                res.ParseFromString(res_msg.payload)
-
-                # balance is in cents (1/100 of deposit currency)
-                money_digits = getattr(res.trader, 'moneyDigits', 2) or 2
-                divisor = 10 ** money_digits
-                balance = res.trader.balance / divisor
-
+                res_msg = await self._recv_until(
+                    reader, [Protobuf.get_type("TraderRes")], mid
+                )
+                res = Protobuf.extract(res_msg)
+                money_digits = getattr(res.trader, "moneyDigits", 2) or 2
+                balance = res.trader.balance / (10 ** money_digits)
                 return {
-                    "total": round(balance, 2),
-                    "free": round(balance, 2),  # conservative: use full balance as free
-                    "equity": round(balance, 2),
+                    "total":    round(balance, 2),
+                    "free":     round(balance, 2),
+                    "equity":   round(balance, 2),
                     "currency": "USD",
                 }
 
             return await self._session(fetch)
 
         except Exception as e:
-            logger.error(f"get_balance failed: {e}")
+            logger.error("get_balance failed: %s", e)
             return {"total": 0, "free": 0, "equity": 0, "error": str(e)}
 
     async def place_order(self, symbol: str, side: str, amount: float,
@@ -267,21 +240,12 @@ class CTraderClient:
                         "error": f"Symbol '{symbol}' not found on this broker account",
                     }
 
-                req = ProtoOANewOrderReq()
+                req = Protobuf.get("NewOrderReq")
                 req.ctidTraderAccountId = self.account_id
-                req.symbolId = symbol_id
-                req.orderType = (
-                    ProtoOAOrderType.Value("MARKET")
-                    if price is None
-                    else ProtoOAOrderType.Value("LIMIT")
-                )
-                req.tradeSide = (
-                    ProtoOATradeSide.Value("BUY")
-                    if side.lower() == "buy"
-                    else ProtoOATradeSide.Value("SELL")
-                )
-                # cTrader volume = centilots (1 lot = 100)
-                req.volume = max(1, int(round(amount * 100)))
+                req.symbolId  = symbol_id
+                req.orderType = 1 if price is None else 2  # MARKET=1, LIMIT=2
+                req.tradeSide = 1 if side.lower() == "buy" else 2  # BUY=1, SELL=2
+                req.volume    = max(1, int(round(amount * 100)))   # centilots
                 if price is not None:
                     req.limitPrice = price
                 if sl is not None:
@@ -289,96 +253,74 @@ class CTraderClient:
                 if tp is not None:
                     req.takeProfit = tp
 
-                writer.write(self._build_frame(
-                    PT_NEW_ORDER_REQ, req.SerializeToString()
-                ))
+                writer.write(self._build_frame(req))
                 await writer.drain()
 
-                res_msg = await self._recv_until(reader, [PT_EXECUTION_EVENT])
-                ev = ProtoOAExecutionEvent()
-                ev.ParseFromString(res_msg.payload)
-
-                order = ev.order
+                res_msg = await self._recv_until(
+                    reader, [Protobuf.get_type("ExecutionEvent")]
+                )
+                ev  = Protobuf.extract(res_msg)
                 pos = ev.position if ev.HasField("position") else None
-                filled_price = pos.price if pos else (price or 0)
-
                 return {
-                    "success": True,
-                    "order_id": str(order.orderId),
+                    "success":     True,
+                    "order_id":    str(ev.order.orderId),
                     "position_id": str(pos.positionId) if pos else None,
-                    "symbol": symbol,
-                    "side": side.upper(),
-                    "amount": amount,
-                    "price": filled_price,
-                    "status": "filled",
-                    "sl": sl,
-                    "tp": tp,
-                    "message": f"{side.upper()} {amount} lot(s) {symbol}",
+                    "symbol":      symbol,
+                    "side":        side.upper(),
+                    "amount":      amount,
+                    "price":       pos.price if pos else (price or 0),
+                    "status":      "filled",
+                    "sl":          sl,
+                    "tp":          tp,
+                    "message":     f"{side.upper()} {amount} lot(s) {symbol}",
                 }
 
             return await self._session(send)
 
         except Exception as e:
-            logger.error(f"place_order failed: {e}")
+            logger.error("place_order failed: %s", e)
             return {"success": False, "error": str(e), "symbol": symbol}
 
     async def get_open_positions(self) -> List[Dict]:
         """Get all open positions."""
         try:
-            async def fetch(reader, writer):
-                return await self._reconcile(reader, writer)
-
-            return await self._session(fetch)
-
+            return await self._session(self._reconcile)
         except Exception as e:
-            logger.error(f"get_open_positions failed: {e}")
+            logger.error("get_open_positions failed: %s", e)
             return []
 
     async def close_position(self, symbol: str, position_id: str) -> Dict:
-        """
-        Close a position by position ID.
-        Fetches current volume via reconcile in the same session.
-        """
+        """Close a position by position ID."""
         try:
             async def close(reader, writer):
-                # Get current volume so we can pass the right amount
                 positions = await self._reconcile(reader, writer)
                 volume = None
                 for p in positions:
                     if p["ticket"] == str(position_id):
-                        # volume stored as lots in our dict; convert back to centilots
                         volume = int(round(p["amount"] * 100))
                         break
 
                 if volume is None:
                     return {
                         "success": False,
-                        "error": f"Position {position_id} not found",
-                        "ticket": position_id,
+                        "error":   f"Position {position_id} not found",
+                        "ticket":  position_id,
                     }
 
-                req = ProtoOAClosePositionReq()
-                req.ctidTraderAccountId = self.account_id
-                req.positionId = int(position_id)
-                req.volume = volume
-
-                writer.write(self._build_frame(
-                    PT_CLOSE_POSITION_REQ, req.SerializeToString()
-                ))
+                req = Protobuf.get("ClosePositionReq",
+                                   ctidTraderAccountId=self.account_id,
+                                   positionId=int(position_id),
+                                   volume=volume)
+                writer.write(self._build_frame(req))
                 await writer.drain()
-
-                await self._recv_until(reader, [PT_EXECUTION_EVENT])
-
-                return {
-                    "success": True,
-                    "message": f"Closed position #{position_id}",
-                    "ticket": position_id,
-                }
+                await self._recv_until(reader, [Protobuf.get_type("ExecutionEvent")])
+                return {"success": True, "message": f"Closed position #{position_id}",
+                        "ticket": position_id}
 
             return await self._session(close)
 
         except Exception as e:
-            logger.error(f"close_position failed: {e}")
+            logger.error("close_position failed: %s", e)
             return {"success": False, "error": str(e), "ticket": position_id}
 
     async def modify_position(self, position_id: str,
@@ -386,87 +328,119 @@ class CTraderClient:
         """Modify SL/TP on an open position."""
         try:
             async def modify(reader, writer):
-                req = ProtoOAAmendPositionSLTPReq()
-                req.ctidTraderAccountId = self.account_id
-                req.positionId = int(position_id)
+                req = Protobuf.get("AmendPositionSLTPReq",
+                                   ctidTraderAccountId=self.account_id,
+                                   positionId=int(position_id))
                 if sl is not None:
                     req.stopLoss = sl
                 if tp is not None:
                     req.takeProfit = tp
 
-                writer.write(self._build_frame(
-                    PT_AMEND_SLTP_REQ, req.SerializeToString()
-                ))
+                writer.write(self._build_frame(req))
                 await writer.drain()
-
-                await self._recv_until(reader, [PT_EXECUTION_EVENT])
-
-                return {
-                    "success": True,
-                    "message": f"Modified position #{position_id}",
-                    "ticket": position_id,
-                    "sl": sl,
-                    "tp": tp,
-                }
+                await self._recv_until(reader, [Protobuf.get_type("ExecutionEvent")])
+                return {"success": True, "message": f"Modified position #{position_id}",
+                        "ticket": position_id, "sl": sl, "tp": tp}
 
             return await self._session(modify)
 
         except Exception as e:
-            logger.error(f"modify_position failed: {e}")
+            logger.error("modify_position failed: %s", e)
             return {"success": False, "error": str(e), "ticket": position_id}
+
+    async def get_deals_by_position(
+        self, position_id: str, from_ts_ms: int, to_ts_ms: int
+    ) -> List[Dict]:
+        """
+        Fetch all deals for a position (ProtoOADealListByPositionIdReq).
+        Returns a list of deal dicts; closing deals have is_close=True and
+        include gross_profit and balance from closePositionDetail.
+        """
+        try:
+            async def fetch(reader, writer):
+                req = Protobuf.get("DealListByPositionIdReq",
+                                   ctidTraderAccountId=self.account_id,
+                                   positionId=int(position_id),
+                                   fromTimestamp=from_ts_ms,
+                                   toTimestamp=to_ts_ms)
+                mid = str(uuid.uuid4())[:8]
+                writer.write(self._build_frame(req, mid))
+                await writer.drain()
+                res_msg = await self._recv_until(
+                    reader, [Protobuf.get_type("DealListByPositionIdRes")], mid
+                )
+                res = Protobuf.extract(res_msg)
+                deals = []
+                for d in res.deal:
+                    deal = {
+                        "deal_id":         d.dealId,
+                        "execution_price": float(d.executionPrice) if d.executionPrice else 0.0,
+                        "is_close":        d.HasField("closePositionDetail"),
+                    }
+                    if d.HasField("closePositionDetail"):
+                        cpd     = d.closePositionDetail
+                        divisor = 10 ** (cpd.moneyDigits if cpd.moneyDigits else 2)
+                        deal["gross_profit"] = cpd.grossProfit / divisor
+                        deal["balance"]      = cpd.balance / divisor
+                    deals.append(deal)
+                return deals
+
+            return await self._session(fetch)
+        except Exception as e:
+            logger.error("get_deals_by_position(%s) failed: %s", position_id, e)
+            return []
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     async def _reconcile(self, reader, writer) -> List[Dict]:
         """Fetch open positions within an existing authenticated session."""
-        req = ProtoOAReconcileReq()
-        req.ctidTraderAccountId = self.account_id
+        req = Protobuf.get("ReconcileReq",
+                           ctidTraderAccountId=self.account_id)
         mid = str(uuid.uuid4())[:8]
-        writer.write(self._build_frame(PT_RECONCILE_REQ, req.SerializeToString(), mid))
+        writer.write(self._build_frame(req, mid))
         await writer.drain()
 
-        res_msg = await self._recv_until(reader, [PT_RECONCILE_RES], mid)
-        res = ProtoOAReconcileRes()
-        res.ParseFromString(res_msg.payload)
+        res_msg = await self._recv_until(
+            reader, [Protobuf.get_type("ReconcileRes")], mid
+        )
+        res = Protobuf.extract(res_msg)
 
         positions = []
         for pos in res.position:
             td = pos.tradeData
             positions.append({
-                "ticket": str(pos.positionId),
-                "symbol": str(td.symbolId),  # symbol ID; resolve to name separately if needed
-                "side": "BUY" if td.tradeSide == ProtoOATradeSide.Value("BUY") else "SELL",
-                "amount": td.volume / 100.0,  # centilots → lots
+                "ticket":      str(pos.positionId),
+                "symbol":      str(td.symbolId),
+                "side":        "BUY" if td.tradeSide == 1 else "SELL",  # BUY=1, SELL=2
+                "amount":      td.volume / 100.0,  # centilots → lots
                 "entry_price": pos.price if pos.HasField("price") else 0,
-                "sl": pos.stopLoss if pos.HasField("stopLoss") else None,
-                "tp": pos.takeProfit if pos.HasField("takeProfit") else None,
-                # NOTE: ProtoOAPosition has no unrealizedPnl field; authoritative
-                # P&L must be fetched via ProtoOADealListReq after close. Return 0
-                # here so callers that only need ticket existence still work.
-                "profit": 0,
+                "sl":          pos.stopLoss if pos.HasField("stopLoss") else None,
+                "tp":          pos.takeProfit if pos.HasField("takeProfit") else None,
+                # NOTE: ProtoOAPosition has no unrealizedPnl field; use
+                # get_deals_by_position() after close for authoritative P&L.
+                "profit":      0,
             })
         return positions
 
     async def _lookup_symbol(self, reader, writer, symbol_name: str) -> Optional[int]:
         """Look up the numeric symbolId for a symbol name within a session."""
-        req = ProtoOASymbolsListReq()
-        req.ctidTraderAccountId = self.account_id
-        req.includeArchivedSymbols = False
+        req = Protobuf.get("SymbolsListReq",
+                           ctidTraderAccountId=self.account_id,
+                           includeArchivedSymbols=False)
         mid = str(uuid.uuid4())[:8]
-        writer.write(self._build_frame(PT_SYMBOLS_LIST_REQ, req.SerializeToString(), mid))
+        writer.write(self._build_frame(req, mid))
         await writer.drain()
 
-        res_msg = await self._recv_until(reader, [PT_SYMBOLS_LIST_RES], mid)
-        res = ProtoOASymbolsListRes()
-        res.ParseFromString(res_msg.payload)
+        res_msg = await self._recv_until(
+            reader, [Protobuf.get_type("SymbolsListRes")], mid
+        )
+        res = Protobuf.extract(res_msg)
 
         for sym in res.symbol:
             if sym.symbolName.upper() == symbol_name.upper():
                 return sym.symbolId
 
         available = [s.symbolName for s in res.symbol[:15]]
-        logger.error(
-            f"Symbol '{symbol_name}' not found. "
-            f"First 15 available: {available}"
-        )
+        logger.error("Symbol '%s' not found. First 15 available: %s",
+                     symbol_name, available)
         return None

@@ -342,23 +342,43 @@ async def run(cfg: Config) -> None:
 
                             for t in trades:
                                 if t["ticket"] and t["ticket"] not in live_tickets:
-                                    # Position closed — use the most recent bar_close
-                                    # cached from the main eval loop. BarFetcher
-                                    # returns None for <50 bars, so we can't just
-                                    # ask for 2 bars on demand here.
-                                    current = latest_close_by_symbol.get(t["symbol"])
-                                    if current is None:
-                                        # Fallback: fetch a full set of bars on miss.
-                                        try:
-                                            c = fetcher.fetch(t["symbol"], "m15", 100)
-                                            if c is not None and len(c) > 0:
-                                                current = float(c[-1, 4])
-                                        except Exception:
-                                            pass
+                                    # Position closed — fetch the actual closing deal from
+                                    # cTrader to get the authoritative exit price and PnL.
+                                    from_ts_ms = int(t["opened_at"].timestamp() * 1000)
+                                    to_ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000) + 60_000
+                                    deals = await client.get_deals_by_position(
+                                        t["ticket"], from_ts_ms, to_ts_ms
+                                    )
+                                    closing_deal = next(
+                                        (d for d in deals if d.get("is_close")), None
+                                    )
 
-                                    exit_price, exit_reason, outcome = _classify_closure(t, current)
-                                    direction = 1 if t["side"] == "BUY" else -1
-                                    pnl = (exit_price - t["entry_price"]) * direction * t["volume_lots"] * 100.0 if exit_price else 0
+                                    if closing_deal and closing_deal["execution_price"] > 0:
+                                        exit_price = closing_deal["execution_price"]
+                                        pnl = closing_deal.get("gross_profit", 0.0)
+                                        close_balance = closing_deal.get("balance", balance)
+                                        _, exit_reason, _ = _classify_closure(t, exit_price)
+                                        if pnl > 0:
+                                            outcome = "WIN"
+                                        elif pnl < 0:
+                                            outcome = "LOSS"
+                                        else:
+                                            outcome = "UNKNOWN"
+                                    else:
+                                        # Deal history unavailable — fall back to bar price
+                                        current = latest_close_by_symbol.get(t["symbol"])
+                                        if current is None:
+                                            try:
+                                                c = fetcher.fetch(t["symbol"], "m15", 100)
+                                                if c is not None and len(c) > 0:
+                                                    current = float(c[-1, 4])
+                                            except Exception:
+                                                pass
+                                        exit_price, exit_reason, outcome = _classify_closure(t, current)
+                                        direction = 1 if t["side"] == "BUY" else -1
+                                        pnl = (exit_price - t["entry_price"]) * direction * t["volume_lots"] * 100.0 if exit_price else 0
+                                        close_balance = balance
+
                                     duration = (datetime.now(timezone.utc) - t["opened_at"]).total_seconds() / 60.0
 
                                     await db.close_trade(
@@ -368,7 +388,7 @@ async def run(cfg: Config) -> None:
                                         pnl=pnl,
                                         outcome=outcome,
                                         duration_minutes=duration,
-                                        account_balance=balance,
+                                        account_balance=close_balance,
                                         account_equity=equity,
                                     )
                                     logger.info(

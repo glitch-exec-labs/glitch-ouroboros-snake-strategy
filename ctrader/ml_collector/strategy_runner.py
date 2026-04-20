@@ -2,9 +2,11 @@
 Strategy runner v2 — loads ALL models, routes per-bot evaluation to the
 correct model and timeframe.
 
-Each bot has an assigned model (from the strategy-matrix.md). The model
-always receives bars under the "m15" key because all existing models
-read candles["m15"] — the model doesn't validate the actual bar interval.
+Each model reads candles under a specific key (see _MODEL_CANDLE_KEY).
+Early models (momentum_hunter, mamba_reversion) read "m15"; later models
+(trend_follower, volume_profiler, session_analyst) read "h1". Bars are
+passed under the key the model actually reads, regardless of the bot's
+real timeframe.
 """
 from __future__ import annotations
 
@@ -31,6 +33,18 @@ _MODEL_CLASSES = {
     "volume_profiler": ("ensemble.models.volume_profiler", "VolumeProfilerModel"),
     "session_analyst": ("ensemble.models.session_analyst", "SessionAnalystModel"),
     "multi_tf_align": ("ensemble.models.multi_tf_align", "MultiTFAlignModel"),
+}
+
+# Maps each model to the candle dict key it reads in analyze().
+# Models added after the initial "m15-only" batch read "h1" instead.
+_MODEL_CANDLE_KEY: Dict[str, str] = {
+    "momentum_hunter": "m15",
+    "mamba_reversion": "m15",
+    "mean_reverter":   "m15",
+    "trend_follower":  "h1",
+    "volume_profiler": "h1",
+    "session_analyst": "h1",
+    "multi_tf_align":  "m15",
 }
 
 
@@ -73,9 +87,10 @@ class StrategyRunner:
         """
         model = self._get_model(bot.model)
 
-        # All existing models read candles["m15"]. We pass whatever-timeframe
-        # bars under that key so the model works unchanged.
-        candles = {"m15": bars}
+        # Pass bars under the key the model actually reads. Falls back to the
+        # bot's real timeframe for any future model that uses its own key.
+        candle_key = _MODEL_CANDLE_KEY.get(bot.model, bot.timeframe)
+        candles = {candle_key: bars}
 
         try:
             result = model.analyze(symbol, candles)
