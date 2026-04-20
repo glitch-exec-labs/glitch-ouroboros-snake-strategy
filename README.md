@@ -9,7 +9,7 @@ Glitch Trade's flagship multi-bot ensemble, combining Oracle coordination with t
 ![Platform](https://img.shields.io/badge/platform-MT5%20today%20%7C%20cTrader%20next-111827?style=for-the-badge)
 ![Scope](https://img.shields.io/badge/scope-oracle%20%7C%20ensemble%20%7C%20risk-1d4ed8?style=for-the-badge)
 
-[Glitch Trading Core](https://github.com/glitch-exec-labs/glitch-trading-core) · [Indian King Cobra](https://github.com/glitch-exec-labs/glitch-indian-king-cobra) · [Terciopelo](https://github.com/glitch-exec-labs/glitch-terciopelo)
+[Glitch Trading Core](https://github.com/glitch-exec-labs/glitch-trade-core) · [Indian King Cobra](https://github.com/glitch-exec-labs/glitch-trade-indian-king-cobra) · [Terciopelo](https://github.com/glitch-exec-labs/glitch-trade-terciopelo)
 
 </div>
 
@@ -244,7 +244,7 @@ This means:
 ## Repo Layout
 
 ```text
-glitch-ouroboros-snake-strategy/
+glitch-trade-ouroboros-snake-strategy/
 ├── mt5/
 │   ├── bots/          # MT5 Expert Advisors (viper, cobra, taipan, mamba, anaconda, hydra)
 │   ├── shared/        # Shared MT5 indicator and utility modules
@@ -297,9 +297,9 @@ The engine is the skeleton. The calibration is the edge.
 
 ## Part Of The Glitch Ecosystem
 
-- [Glitch Trading Core](https://github.com/glitch-exec-labs/glitch-trading-core) — umbrella architecture repo
-- [Indian King Cobra](https://github.com/glitch-exec-labs/glitch-indian-king-cobra) — standalone unified momentum scalper
-- [Terciopelo](https://github.com/glitch-exec-labs/glitch-terciopelo) — standalone equities relative-value strategy
+- [Glitch Trading Core](https://github.com/glitch-exec-labs/glitch-trade-core) — umbrella architecture repo
+- [Indian King Cobra](https://github.com/glitch-exec-labs/glitch-trade-indian-king-cobra) — standalone unified momentum scalper
+- [Terciopelo](https://github.com/glitch-exec-labs/glitch-trade-terciopelo) — standalone equities relative-value strategy
 
 ---
 
