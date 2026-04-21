@@ -1,0 +1,16 @@
+{
+  "_comment": "Momentum hunter tuning — RSI crossover + EMA trend filter + volume confirmation on M15.",
+  "min_bars": 50,
+  "rsi_period": 14,
+  "ema_period": 20,
+  "volume_window": 50,
+  "volume_confirmed_mult": 1.3,
+  "rsi_crossover_lookback": 5,
+  "rsi_bullish_cross": 52,
+  "rsi_bearish_cross": 48,
+  "base_confidence": 0.65,
+  "ema_boost": 0.10,
+  "volume_boost": 0.15,
+  "max_confidence": 0.95,
+  "hold_confidence": 0.5
+}

@@ -15,16 +15,16 @@ class TrendFollowerModel(BaseModel):
     - ADX > 15 for trend confirmation
     - ATR vs median(ATR, 100) as confidence modifier (not a hard gate)
     """
-    
+
     name = "trend_follower"
     version = "1.0"
-    
+
     def analyze(self, symbol: str, candles: Dict[str, np.ndarray]) -> Dict[str, Any]:
         """Run trend following analysis on H1 candles."""
-        # Use H1 candles as specified
         h1_candles = candles.get("h1")
-        
-        if h1_candles is None or len(h1_candles) < 50:
+
+        min_bars = self.p("min_bars", 50)
+        if h1_candles is None or len(h1_candles) < min_bars:
             return {
                 "model": self.name,
                 "vote": "HOLD",
@@ -32,11 +32,11 @@ class TrendFollowerModel(BaseModel):
                 "reasoning": "Insufficient H1 candle data for analysis.",
                 "indicators": {}
             }
-        
+
         # Extract OHLCV
         _, highs, lows, closes, _ = self._extract_ohlcv(h1_candles)
-        
-        if closes is None or len(closes) < 50:
+
+        if closes is None or len(closes) < min_bars:
             return {
                 "model": self.name,
                 "vote": "HOLD",
@@ -44,25 +44,32 @@ class TrendFollowerModel(BaseModel):
                 "reasoning": "Invalid close price data.",
                 "indicators": {}
             }
-        
+
+        sma_period = self.p("sma_period", 9)
+        ema_period = self.p("ema_period", 21)
+        adx_period = self.p("adx_period", 14)
+        atr_period = self.p("atr_period", 14)
+        crossover_lookback = self.p("crossover_lookback", 5)
+        atr_median_window = self.p("atr_median_window", 100)
+
         # Calculate indicators
-        sma_9 = sma(closes, 9)
-        ema_21 = ema(closes, 21)
-        adx_vals = adx(highs, lows, closes, 14)
-        atr_vals = atr(highs, lows, closes, 14)
-        
+        sma_9 = sma(closes, sma_period)
+        ema_21 = ema(closes, ema_period)
+        adx_vals = adx(highs, lows, closes, adx_period)
+        atr_vals = atr(highs, lows, closes, atr_period)
+
         # Get current values
         current_close = closes[-1]
         current_adx = adx_vals[-1] if not np.isnan(adx_vals[-1]) else 0
         current_atr = atr_vals[-1] if not np.isnan(atr_vals[-1]) else 0
-        
-        # Calculate median ATR over last 100 bars
-        atr_100 = atr_vals[-100:] if len(atr_vals) >= 100 else atr_vals
-        atr_median = np.median(atr_100[~np.isnan(atr_100)]) if len(atr_100) > 0 else 0
-        
-        # Detect crossover within last 5 bars
-        crossover = self._detect_crossover_last_n(sma_9, ema_21, 5)
-        
+
+        # Calculate median ATR over window
+        atr_window = atr_vals[-atr_median_window:] if len(atr_vals) >= atr_median_window else atr_vals
+        atr_median = np.median(atr_window[~np.isnan(atr_window)]) if len(atr_window) > 0 else 0
+
+        # Detect crossover within last n bars
+        crossover = self._detect_crossover_last_n(sma_9, ema_21, crossover_lookback)
+
         # Build indicators dict
         indicators = {
             "sma_9": round(float(sma_9[-1]), 4) if len(sma_9) > 0 else None,
@@ -72,24 +79,33 @@ class TrendFollowerModel(BaseModel):
             "atr_median_100": round(float(atr_median), 4),
             "crossover": crossover
         }
-        
-        # Check conditions — ADX 15 threshold (developing trends)
-        trend_exists = current_adx > 15
+
+        adx_min_trend = self.p("adx_min_trend", 15)
+        adx_strong = self.p("adx_strong", 25)
+        adx_mid = self.p("adx_mid", 20)
+        strong_confidence = self.p("strong_confidence", 0.9)
+        mid_confidence = self.p("mid_confidence", 0.75)
+        low_confidence = self.p("low_confidence", 0.6)
+        low_vol_penalty = self.p("low_vol_penalty", 0.15)
+        min_confidence_floor = self.p("min_confidence_floor", 0.45)
+        hold_confidence = self.p("hold_confidence", 0.5)
+
+        # Check conditions
+        trend_exists = current_adx > adx_min_trend
         low_volatility = current_atr < atr_median
 
         # Determine signal — crossover + trend required, ATR is confidence modifier only
         if crossover == "bullish" and trend_exists:
-            # Calculate confidence based on ADX strength
-            if current_adx >= 25:
-                confidence = 0.9
-            elif current_adx >= 20:
-                confidence = 0.75
+            if current_adx >= adx_strong:
+                confidence = strong_confidence
+            elif current_adx >= adx_mid:
+                confidence = mid_confidence
             else:
-                confidence = 0.6  # ADX 15-20: developing trend
+                confidence = low_confidence
 
             # ATR as confidence modifier (not a hard gate)
             if low_volatility:
-                confidence = max(0.45, confidence - 0.15)
+                confidence = max(min_confidence_floor, confidence - low_vol_penalty)
                 atr_note = " Low ATR — reduced confidence."
             else:
                 atr_note = ""
@@ -105,17 +121,15 @@ class TrendFollowerModel(BaseModel):
             }
 
         elif crossover == "bearish" and trend_exists:
-            # Calculate confidence based on ADX strength
-            if current_adx >= 25:
-                confidence = 0.9
-            elif current_adx >= 20:
-                confidence = 0.75
+            if current_adx >= adx_strong:
+                confidence = strong_confidence
+            elif current_adx >= adx_mid:
+                confidence = mid_confidence
             else:
-                confidence = 0.6  # ADX 15-20: developing trend
+                confidence = low_confidence
 
-            # ATR as confidence modifier (not a hard gate)
             if low_volatility:
-                confidence = max(0.45, confidence - 0.15)
+                confidence = max(min_confidence_floor, confidence - low_vol_penalty)
                 atr_note = " Low ATR — reduced confidence."
             else:
                 atr_note = ""
@@ -143,34 +157,34 @@ class TrendFollowerModel(BaseModel):
         return {
             "model": self.name,
             "vote": "HOLD",
-            "confidence": 0.5,
+            "confidence": hold_confidence,
             "reasoning": reasoning,
             "indicators": indicators
         }
-    
+
     def _detect_crossover_last_n(self, fast_line: np.ndarray, slow_line: np.ndarray, n: int = 3) -> str:
         """Detect if fast line crossed slow line within last n bars."""
         if len(fast_line) < n + 1 or len(slow_line) < n + 1:
             return "none"
-        
+
         for i in range(1, n + 1):
             curr_idx = -i
             prev_idx = -i - 1
-            
+
             if abs(prev_idx) > len(fast_line) or abs(prev_idx) > len(slow_line):
                 break
-            
+
             fast_prev = fast_line[prev_idx]
             fast_curr = fast_line[curr_idx]
             slow_prev = slow_line[prev_idx]
             slow_curr = slow_line[curr_idx]
-            
+
             # Bullish crossover: fast was below, now above
             if fast_prev < slow_prev and fast_curr > slow_curr:
                 return "bullish"
-            
+
             # Bearish crossover: fast was above, now below
             if fast_prev > slow_prev and fast_curr < slow_curr:
                 return "bearish"
-        
+
         return "none"

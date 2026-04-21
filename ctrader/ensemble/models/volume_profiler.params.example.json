@@ -1,0 +1,14 @@
+{
+  "_comment": "Volume profiler tuning — ATR percentile + volume ratio + EMA slope direction on H1.",
+  "min_bars": 100,
+  "atr_period": 14,
+  "atr_percentile_window": 100,
+  "atr_percentile_threshold": 55,
+  "ema_period": 20,
+  "ema_slope_window": 10,
+  "volume_window": 50,
+  "volume_mult_threshold": 1.2,
+  "both_favorable_confidence": 0.8,
+  "partial_favorable_confidence": 0.4,
+  "hold_confidence": 0.5
+}

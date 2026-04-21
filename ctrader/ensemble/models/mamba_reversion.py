@@ -36,7 +36,8 @@ class MambaReversionModel(BaseModel):
     version = "1.0"
 
     def __init__(self, config: dict = None):
-        self.cfg = {**_DEFAULT_CFG, **(config or {})}
+        super().__init__()
+        self.cfg = {**_DEFAULT_CFG, **self.params, **(config or {})}
 
     def analyze(self, symbol: str, candles: Dict[str, np.ndarray]) -> Dict[str, Any]:
         m15 = candles.get("m15")

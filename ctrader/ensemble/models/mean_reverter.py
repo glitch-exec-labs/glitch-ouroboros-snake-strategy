@@ -16,15 +16,16 @@ class MeanReverterModel(BaseModel):
     - ADX < 30 confirming ranging market (not trending)
     - Secondary signal: price near BB band (within 0.3x width) with mild RSI
     """
-    
+
     name = "mean_reverter"
     version = "1.0"
-    
+
     def analyze(self, symbol: str, candles: Dict[str, np.ndarray]) -> Dict[str, Any]:
         """Run mean reversion analysis on H1 candles."""
         h1_candles = candles.get("h1")
-        
-        if h1_candles is None or len(h1_candles) < 50:
+
+        min_bars = self.p("min_bars", 50)
+        if h1_candles is None or len(h1_candles) < min_bars:
             return {
                 "model": self.name,
                 "vote": "HOLD",
@@ -32,11 +33,11 @@ class MeanReverterModel(BaseModel):
                 "reasoning": "Insufficient H1 candle data for analysis.",
                 "indicators": {}
             }
-        
+
         # Extract OHLCV
         _, highs, lows, closes, _ = self._extract_ohlcv(h1_candles)
-        
-        if closes is None or len(closes) < 50:
+
+        if closes is None or len(closes) < min_bars:
             return {
                 "model": self.name,
                 "vote": "HOLD",
@@ -44,19 +45,24 @@ class MeanReverterModel(BaseModel):
                 "reasoning": "Invalid close price data.",
                 "indicators": {}
             }
-        
+
         # Calculate indicators
-        upper_bb, middle_bb, lower_bb = bollinger_bands(closes, 20, 2.0)
-        rsi_vals = rsi(closes, 14)
-        adx_vals = adx(highs, lows, closes, 14)
-        
+        bb_period = self.p("bb_period", 20)
+        bb_std = self.p("bb_std", 2.0)
+        rsi_period = self.p("rsi_period", 14)
+        adx_period = self.p("adx_period", 14)
+
+        upper_bb, middle_bb, lower_bb = bollinger_bands(closes, bb_period, bb_std)
+        rsi_vals = rsi(closes, rsi_period)
+        adx_vals = adx(highs, lows, closes, adx_period)
+
         # Get current values
         current_close = closes[-1]
         current_upper = upper_bb[-1]
         current_lower = lower_bb[-1]
         current_rsi = rsi_vals[-1] if not np.isnan(rsi_vals[-1]) else 50
         current_adx = adx_vals[-1] if not np.isnan(adx_vals[-1]) else 0
-        
+
         # Build indicators dict
         indicators = {
             "close": round(float(current_close), 4),
@@ -66,35 +72,49 @@ class MeanReverterModel(BaseModel):
             "adx": round(float(current_adx), 2),
             "bb_position": "below" if current_close < current_lower else "above" if current_close > current_upper else "inside"
         }
-        
-        # Check ranging market condition (widened from 25 to 30)
-        is_ranging = current_adx < 30
+
+        adx_ranging_threshold = self.p("adx_ranging_threshold", 30)
+        rsi_oversold = self.p("rsi_oversold", 35)
+        rsi_overbought = self.p("rsi_overbought", 65)
+        near_band_pct = self.p("near_band_pct", 0.3)
+        mild_oversold_thr = self.p("mild_oversold", 42)
+        mild_overbought_thr = self.p("mild_overbought", 58)
+        base_confidence = self.p("base_confidence", 0.6)
+        rsi_extreme_scale = self.p("rsi_extreme_scale", 0.2)
+        bb_distance_scale = self.p("bb_distance_scale", 0.5)
+        bb_distance_cap = self.p("bb_distance_cap", 0.2)
+        max_confidence = self.p("max_confidence", 0.95)
+        secondary_confidence = self.p("secondary_confidence", 0.55)
+        hold_confidence = self.p("hold_confidence", 0.5)
+
+        # Check ranging market condition
+        is_ranging = current_adx < adx_ranging_threshold
 
         # BB band width for proximity calculations
         bb_width = current_upper - current_lower if (current_upper - current_lower) > 0 else 0.0001
 
-        # Check for oversold (potential BUY) — widened RSI from 30 to 35
+        # Check for oversold (potential BUY)
         is_below_bb = current_close < current_lower
-        is_oversold = current_rsi < 35
+        is_oversold = current_rsi < rsi_oversold
 
-        # Check for overbought (potential SELL) — widened RSI from 70 to 65
+        # Check for overbought (potential SELL)
         is_above_bb = current_close > current_upper
-        is_overbought = current_rsi > 65
+        is_overbought = current_rsi > rsi_overbought
 
-        # Secondary signal: price near BB band (within 0.3x width) with mild RSI
-        near_lower = current_close < (current_lower + bb_width * 0.3)
-        near_upper = current_close > (current_upper - bb_width * 0.3)
-        mild_oversold = current_rsi < 42  # not extreme, but leaning oversold
-        mild_overbought = current_rsi > 58  # not extreme, but leaning overbought
+        # Secondary signal: price near BB band with mild RSI
+        near_lower = current_close < (current_lower + bb_width * near_band_pct)
+        near_upper = current_close > (current_upper - bb_width * near_band_pct)
+        mild_oversold = current_rsi < mild_oversold_thr
+        mild_overbought = current_rsi > mild_overbought_thr
 
         # Generate signals if ranging
         if is_ranging:
             # Primary signal: price outside BB + RSI extreme
             if is_below_bb and is_oversold:
-                rsi_extreme = max(0, (35 - current_rsi) / 35)
+                rsi_extreme = max(0, (rsi_oversold - current_rsi) / rsi_oversold)
                 bb_distance = (current_lower - current_close) / bb_width
-                confidence = 0.6 + (rsi_extreme * 0.2) + (min(bb_distance, 0.2) * 0.5)
-                confidence = min(0.95, confidence)
+                confidence = base_confidence + (rsi_extreme * rsi_extreme_scale) + (min(bb_distance, bb_distance_cap) * bb_distance_scale)
+                confidence = min(max_confidence, confidence)
 
                 reasoning = f"Price below lower BB ({current_close:.2f} < {current_lower:.2f}) with RSI oversold at {current_rsi:.1f} in ranging market (ADX {current_adx:.1f})."
 
@@ -107,10 +127,10 @@ class MeanReverterModel(BaseModel):
                 }
 
             elif is_above_bb and is_overbought:
-                rsi_extreme = max(0, (current_rsi - 65) / 35)
+                rsi_extreme = max(0, (current_rsi - rsi_overbought) / rsi_oversold)
                 bb_distance = (current_close - current_upper) / bb_width
-                confidence = 0.6 + (rsi_extreme * 0.2) + (min(bb_distance, 0.2) * 0.5)
-                confidence = min(0.95, confidence)
+                confidence = base_confidence + (rsi_extreme * rsi_extreme_scale) + (min(bb_distance, bb_distance_cap) * bb_distance_scale)
+                confidence = min(max_confidence, confidence)
 
                 reasoning = f"Price above upper BB ({current_close:.2f} > {current_upper:.2f}) with RSI overbought at {current_rsi:.1f} in ranging market (ADX {current_adx:.1f})."
 
@@ -124,7 +144,7 @@ class MeanReverterModel(BaseModel):
 
             # Secondary signal: price near BB + mild RSI (weaker signal)
             elif near_lower and mild_oversold and not is_above_bb:
-                confidence = 0.55
+                confidence = secondary_confidence
                 reasoning = f"Price approaching lower BB ({current_close:.2f} near {current_lower:.2f}) with RSI leaning oversold at {current_rsi:.1f}. Weaker mean reversion signal."
 
                 return {
@@ -136,7 +156,7 @@ class MeanReverterModel(BaseModel):
                 }
 
             elif near_upper and mild_overbought and not is_below_bb:
-                confidence = 0.55
+                confidence = secondary_confidence
                 reasoning = f"Price approaching upper BB ({current_close:.2f} near {current_upper:.2f}) with RSI leaning overbought at {current_rsi:.1f}. Weaker mean reversion signal."
 
                 return {
@@ -163,7 +183,7 @@ class MeanReverterModel(BaseModel):
         return {
             "model": self.name,
             "vote": "HOLD",
-            "confidence": 0.5,
+            "confidence": hold_confidence,
             "reasoning": reasoning,
             "indicators": indicators
         }

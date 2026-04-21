@@ -1,0 +1,12 @@
+{
+  "_comment": "Mamba reversion tuning — Bollinger Band mean reversion in ranging (low-ADX) markets on M15.",
+  "bb_period": 20,
+  "bb_std_mult": 2.0,
+  "rsi_period": 14,
+  "atr_period": 14,
+  "adx_period": 14,
+  "adx_threshold": 25,
+  "rsi_oversold": 30,
+  "rsi_overbought": 70,
+  "bb_entry_pct": 0.15
+}

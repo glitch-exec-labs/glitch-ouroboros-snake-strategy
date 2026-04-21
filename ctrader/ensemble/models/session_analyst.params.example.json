@@ -1,0 +1,22 @@
+{
+  "_comment": "Session analyst tuning — trading session windows (UTC) and confidence by session quality.",
+  "min_bars": 30,
+  "ema_period": 20,
+  "ema_slope_window": 5,
+  "slope_threshold_pct": 0.0001,
+  "asian_start": 0,
+  "asian_end": 7,
+  "london_start": 7,
+  "london_end": 16,
+  "ny_start": 12,
+  "ny_end": 21,
+  "overlap_start": 12,
+  "overlap_end": 16,
+  "overlap_confidence": 0.9,
+  "primary_confidence": 0.8,
+  "asian_forex_confidence": 0.5,
+  "asian_crypto_confidence": 0.7,
+  "asian_crypto_penalty": 0.9,
+  "hold_confidence": 0.5,
+  "forex_symbols": ["EURUSD","GBPUSD","USDJPY","XAUUSD","USOUSD","AUDUSD","USDCAD"]
+}

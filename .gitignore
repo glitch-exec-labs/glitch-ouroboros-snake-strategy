@@ -30,3 +30,6 @@ models/
 .vscode/
 Thumbs.db
 .DS_Store
+
+# Model tuning — real values are private; .params.example.json stay public
+ctrader/ensemble/models/*.params.json

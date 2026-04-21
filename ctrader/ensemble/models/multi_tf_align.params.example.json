@@ -1,0 +1,10 @@
+{
+  "_comment": "Multi-timeframe alignment tuning — EMA trend direction across M15/H1/H4.",
+  "min_bars": 30,
+  "ema_period": 20,
+  "trend_threshold_pct": 0.0003,
+  "three_aligned_confidence": 0.9,
+  "two_zero_confidence": 0.6,
+  "two_one_confidence": 0.45,
+  "hold_confidence": 0.5
+}

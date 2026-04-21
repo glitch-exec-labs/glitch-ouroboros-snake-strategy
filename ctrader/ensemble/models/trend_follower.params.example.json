@@ -1,0 +1,19 @@
+{
+  "_comment": "Trend follower tuning — SMA/EMA crossover + ADX trend filter + ATR volatility modifier on H1.",
+  "min_bars": 50,
+  "sma_period": 9,
+  "ema_period": 21,
+  "adx_period": 14,
+  "atr_period": 14,
+  "crossover_lookback": 5,
+  "atr_median_window": 100,
+  "adx_min_trend": 15,
+  "adx_strong": 25,
+  "adx_mid": 20,
+  "strong_confidence": 0.9,
+  "mid_confidence": 0.75,
+  "low_confidence": 0.6,
+  "low_vol_penalty": 0.15,
+  "min_confidence_floor": 0.45,
+  "hold_confidence": 0.5
+}
