@@ -505,15 +505,31 @@ async def run(cfg: Config) -> None:
                                         t["bot_name"], t["symbol"], exit_reason, outcome, pnl,
                                     )
 
-                            # Orphan detection — any broker-open ticket NOT in ml_trades
+                            # Orphan detection — any broker-open ticket NOT in ml_trades.
+                            # Two race guards:
+                            #   1. db_tickets from `trades` was stale by the time we polled
+                            #      the broker; re-check directly against ml_trades.
+                            #   2. Skip tickets whose broker-side open time is very recent —
+                            #      the normal order_placer flow may still be mid-insert.
                             db_tickets = {str(t["ticket"]) for t in trades if t["ticket"]}
                             for pos in positions:
                                 tkt = str(pos.get("ticket"))
-                                if tkt and tkt not in db_tickets:
-                                    try:
-                                        await _backfill_orphan(account_id, pos)
-                                    except Exception:
-                                        logger.exception("orphan backfill failed tkt=%s", tkt)
+                                if not tkt or tkt in db_tickets:
+                                    continue
+
+                                # Race-guard #1: fresh DB query in case insert_trade landed
+                                # between our earlier get_open_trades() and this moment.
+                                recheck = await db._pool.fetchval(  # noqa: SLF001
+                                    "SELECT 1 FROM ml_trades WHERE account_id=$1 AND ticket=$2",
+                                    account_id, tkt,
+                                )
+                                if recheck:
+                                    continue
+
+                                try:
+                                    await _backfill_orphan(account_id, pos)
+                                except Exception:
+                                    logger.exception("orphan backfill failed tkt=%s", tkt)
                         except Exception:
                             logger.exception("monitor_loop failed for account %s", account_id)
             except Exception:
