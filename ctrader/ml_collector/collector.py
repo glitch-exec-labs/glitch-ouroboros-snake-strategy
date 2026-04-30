@@ -561,7 +561,7 @@ async def run(cfg: Config) -> None:
     for i, bot in enumerate(cfg.bots):
         tasks.append(bot_loop(bot, offset=i * 10))
     tasks.append(monitor_loop())
-    tasks.append(oracle_loop(pool))
+    tasks.append(oracle_loop(pool, stop))
 
     await asyncio.gather(*tasks)
     await pool.close()

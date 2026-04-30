@@ -352,13 +352,15 @@ async def _write_decision(
 
 # ── Loop ──────────────────────────────────────────────────────────────────────
 
-async def oracle_loop(pool: asyncpg.Pool) -> None:
+async def oracle_loop(pool: asyncpg.Pool, stop: Optional[asyncio.Event] = None) -> None:
     cfg = get_config()
     weights = await _load_weights(pool)
     logger.info("Oracle started (mode=%s, %d symbols, weights=%s)",
                 ORACLE_MODE, len(cfg.symbols), {k: v.weight for k, v in weights.items()})
 
     while True:
+        if stop is not None and stop.is_set():
+            return
         try:
             for symbol in cfg.symbols:
                 votes = await _latest_signals(pool, symbol, weights)
@@ -390,7 +392,16 @@ async def oracle_loop(pool: asyncpg.Pool) -> None:
         except Exception:
             logger.exception("oracle_loop iteration failed")
 
-        await asyncio.sleep(ORACLE_INTERVAL_SECONDS)
+        # Honor the shutdown event if one was passed in (collector's main task).
+        # Falls back to plain sleep for the standalone python -m ml_collector.oracle CLI.
+        if stop is not None:
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=ORACLE_INTERVAL_SECONDS)
+                return  # stop set — exit cleanly
+            except asyncio.TimeoutError:
+                pass
+        else:
+            await asyncio.sleep(ORACLE_INTERVAL_SECONDS)
 
 
 async def main() -> None:
