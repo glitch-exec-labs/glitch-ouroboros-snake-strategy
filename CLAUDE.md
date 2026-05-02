@@ -4,7 +4,7 @@ Operational context for Claude sessions working on this repo. Read this first.
 
 ## What This Is
 
-Public GitHub repo: `glitch-exec-labs/glitch-ouroboros-snake-strategy` (now redirected to `glitch-trade-ouroboros-snake-strategy` — update remote URL at some point).
+Public GitHub repo: `glitch-exec-labs/glitch-trade-ouroboros-ai-trading-bot` (renamed 2026-05-02 for SEO; previous names `glitch-trade-ouroboros-ai-trading-bot` and `glitch-trade-ouroboros-ai-trading-bot` redirect).
 
 Flagship 6-bot cTrader ensemble with Oracle coordination, portfolio risk gate, and a PostgreSQL-backed ML data collection loop. The six bots (hydra M1, viper M5, mamba M15, taipan M30, cobra H1, anaconda H4) run in parallel on dedicated cTrader demo accounts. Goal: accumulate ~6 months of labelled training data for eventual model retraining.
 
@@ -181,6 +181,5 @@ sudo systemctl restart glitch-ml-collector.service
 
 - **Monitor Oracle shadow output** for 2–4 weeks against bot outcomes before wiring live ensemble execution.
 - **Phase 2 (private companion repo)** when building the ML training pipeline on the 6-month dataset.
-- Remote URL rename: `git remote set-url origin git@github.com:glitch-exec-labs/glitch-trade-ouroboros-snake-strategy.git` when convenient.
 - `mean_reverter.py` has `rsi_extreme` divisor wired to `rsi_oversold` param (same default, identical behaviour). Split to `rsi_extreme_divisor` if isolation matters.
 - `session_analyst.py` has `ema_slope_window * 2` as the min-bars guard. Split if isolation matters.

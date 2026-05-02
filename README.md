@@ -1,8 +1,8 @@
 <div align="center">
 
-# Glitch Trade Ouroboros Snake Strategy
+# Ouroboros — AI Trading Bot
 
-Glitch Trade's flagship multi-bot ensemble, combining Oracle coordination with the six-snake execution stack.
+A multi-bot AI trading ensemble for cTrader: six specialized strategies, an Oracle coordination layer, an XGBoost meta-classifier overlay, and an LLM-classified news-event embargo gate. Python · PostgreSQL · cTrader Open API. Public engine, private tuning.
 
 ![Product](https://img.shields.io/badge/product-Flagship%20Ensemble-0f766e?style=for-the-badge)
 ![Family](https://img.shields.io/badge/family-glitch%20trading-111827?style=for-the-badge)
@@ -15,7 +15,7 @@ Glitch Trade's flagship multi-bot ensemble, combining Oracle coordination with t
 
 > Part of **Glitch Trade**, the trading domain inside **Glitch Executor Labs** — one builder shipping products across **Trade**, **Edge**, and **Grow**.
 
-> Ouroboros Snake Strategy is the flagship coordinated Glitch ensemble: six specialized execution bots, one Oracle layer, and a portfolio-aware risk model designed to keep the stack coherent across any market regime.
+> Ouroboros is the flagship Glitch Trade AI trading bot: six specialized rule-based execution bots, an Oracle weighted-voting layer, a portfolio-aware risk gate, an LLM-driven news-event embargo system, and per-bot XGBoost meta-classifiers trained on accumulated outcomes. Built for cTrader; PostgreSQL is the source of truth.
 
 ---
 
@@ -244,7 +244,7 @@ This means:
 ## Repo Layout
 
 ```text
-glitch-trade-ouroboros-snake-strategy/
+glitch-trade-ouroboros-ai-trading-bot/
 ├── mt5/
 │   ├── bots/          # MT5 Expert Advisors (viper, cobra, taipan, mamba, anaconda, hydra)
 │   ├── shared/        # Shared MT5 indicator and utility modules
