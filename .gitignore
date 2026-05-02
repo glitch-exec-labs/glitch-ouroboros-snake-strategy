@@ -33,3 +33,6 @@ Thumbs.db
 
 # Model tuning — real values are private; .params.example.json stay public
 ctrader/ensemble/models/*.params.json
+
+# Trained ML model bundles — regenerate from data, never commit
+ctrader/ml_collector/learning/models/*.pkl
